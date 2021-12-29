@@ -1,0 +1,65 @@
+#region Required Modules
+
+Import-Module VMWare.PowerCLI
+
+#endregion
+
+#region Adjustable Variables
+
+$MyHosts = "<Enter VCenter Host FQDN>"
+$username = "<Enter Username to connect to VCenter Host>"
+$password = "<Enter User's Password here>"
+$Cluster = Get-Cluster -Name "<Enter name of cluster in VCenter you wish to update. Multiples can be entered seperated by commas> ie. 'Site1, Site2'"
+$Baseline = Get-Baseline -Name "<Enter name of baseline you wish to use for updates. Multiples can be entered seperated by commas. ie. 'Critical Host Patches (Predefined)","Non-Critical Host Patches (Predefined)'>"
+$Question = "Would you like to place ESX hosts in maintenance mode and update now?"
+$Title = "Update Confirmation"
+$choices  = '&Yes', '&No'
+ 
+#endregion
+
+#region Connect to VCenter
+
+#Connects to the vcenter server
+$MyHosts | Foreach {
+Write-Host "Connecting to host: $($_)"
+$connection = Connect-VIServer $_ -User $username -Password $password
+}
+
+#endregion
+
+#region Checks for compliance against baselines
+
+#Checks for compliance against the baselines
+Test-Compliance -Entity $Cluster
+$Compliance = Get-Compliance -Entity $Cluster -Baseline $Baseline
+
+#endregion
+
+#region Updates to VCenter ESX Hosts working script
+
+Foreach ($Server in $Servers){
+Write-Host "Working on $server"
+
+if ($Compliance -eq 'Compliant'){
+    Write-Host 'All hosts in the cluster are compliant. Exiting the script now'
+    Pause 5
+    Exit
+    }
+
+Else{
+    Write-Host 'There are hosts in the cluster that are not compliant. Will begin staging patches now.'
+    Copy-Patch -Entity $Cluster -Baseline $Baseline
+    Write-Host 'All patches have been successfully staged.'
+    $decision1 = $Host.UI.PromptForChoice($Title, $Question, $choices, 1)
+        if ($decision1 -eq 0) {
+            Write-Host 'Update now confirmed. Will now begin patching ESX hosts.' -ForegroundColor Green
+            Update-Entity -Entity $Cluster -Baseline $Baseline -ClusterDisableDistributedPowerManagement:$true -ClusterDisableHighAvailability:$true -ClusterDisableFaultTolerance:$true -ClusterEnableParallelRemediation:$true -RunAsync -Confirm:$false
+            }
+        else {
+            Write-Host 'Update not confirmed. Please update ESX hosts as soon as possible. Will now exit. ' -ForegroundColor Yellow
+            }
+
+    }
+}
+
+#endregion
